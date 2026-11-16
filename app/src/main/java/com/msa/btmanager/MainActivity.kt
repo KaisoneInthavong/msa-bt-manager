@@ -5,10 +5,16 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import android.os.Bundle
-import android.widget.*
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ListView
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import java.io.IOException
-import java.util.*
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
 
@@ -20,10 +26,10 @@ class MainActivity : AppCompatActivity() {
 
     private var bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
     private var socket: BluetoothSocket? = null
-    private var outputStream = null
-    private var inputStream = null
-    
-    private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+    private var outputStream: OutputStream? = null
+    private var inputStream: InputStream? = null
+
+    private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
     @SuppressLint("MissingPermission")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,13 +42,8 @@ class MainActivity : AppCompatActivity() {
         etCommand = findViewById(R.id.etCommand)
         tvLog = findViewById(R.id.tvLog)
 
-        btnScan.setOnClickListener {
-            scanDevices()
-        }
-
-        btnSend.setOnClickListener {
-            sendCommand()
-        }
+        btnScan.setOnClickListener { scanDevices() }
+        btnSend.setOnClickListener { sendCommand() }
     }
 
     @SuppressLint("MissingPermission")
@@ -67,14 +68,14 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BluetoothDevice) {
         log("Connecting to ${device.name}...")
-        
+
         Thread {
             try {
-                socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+                socket = device.createRfcommSocketToServiceRecord(sppUuid)
                 socket?.connect()
                 outputStream = socket?.outputStream
                 inputStream = socket?.inputStream
-                
+
                 runOnUiThread { log("Connected successfully!") }
                 startListening()
             } catch (e: IOException) {

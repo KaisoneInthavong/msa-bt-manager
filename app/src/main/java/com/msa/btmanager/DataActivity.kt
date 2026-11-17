@@ -17,17 +17,19 @@ import androidx.appcompat.app.AppCompatActivity
 import com.msa.btmanager.data.AppDatabase
 import com.msa.btmanager.data.CommLogEntry
 import com.msa.btmanager.data.DeviceEntity
+import com.msa.btmanager.data.TagDump
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class DataActivity : AppCompatActivity() {
 
-    private enum class Mode { DEVICES, LOG }
+    private enum class Mode { DEVICES, LOG, TAGS }
 
     private val db by lazy { AppDatabase.get(this) }
     private var mode = Mode.DEVICES
     private var deviceRows: List<DeviceEntity> = emptyList()
+    private var tagRows: List<TagDump> = emptyList()
 
     private lateinit var tvTitle: TextView
     private lateinit var listData: ListView
@@ -47,9 +49,17 @@ class DataActivity : AppCompatActivity() {
             mode = Mode.LOG
             load()
         }
+        findViewById<Button>(R.id.btnTags).setOnClickListener {
+            mode = Mode.TAGS
+            load()
+        }
 
         listData.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
-            if (mode == Mode.DEVICES) showDeviceOptions(position)
+            when (mode) {
+                Mode.DEVICES -> showDeviceOptions(position)
+                Mode.TAGS -> showTagOptions(position)
+                Mode.LOG -> {}
+            }
         }
 
         load()
@@ -87,6 +97,19 @@ class DataActivity : AppCompatActivity() {
                             Toast.makeText(this, "No communication logged yet", Toast.LENGTH_SHORT).show()
                     }
                 }
+                Mode.TAGS -> {
+                    tagRows = db.tagDumpDao().getAll()
+                    val lines = tagRows.map { t ->
+                        "${t.uidHex}\n${t.tagType.take(24)} • ${t.sizeBytes} B • keys: ${t.foundKeys.ifBlank { "-" }}"
+                    }
+                    runOnUiThread {
+                        tvTitle.text = "Saved tag dumps (${tagRows.size})"
+                        listData.adapter =
+                            ArrayAdapter(this, android.R.layout.simple_list_item_1, lines)
+                        if (lines.isEmpty())
+                            Toast.makeText(this, "No tag dumps saved yet", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }.start()
     }
@@ -103,6 +126,31 @@ class DataActivity : AppCompatActivity() {
                     1 -> copyToClipboard("device name", name)
                     2 -> copyToClipboard("device address", d.address)
                     3 -> confirmDelete(d)
+                }
+            }
+            .show()
+    }
+
+    private fun showTagOptions(index: Int) {
+        val t = tagRows.getOrNull(index) ?: return
+        val actions = arrayOf("Copy UID", "Copy NDEF payload", "Copy full hex dump", "Delete dump")
+        AlertDialog.Builder(this)
+            .setTitle("Tag ${t.uidHex}")
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> copyToClipboard("tag UID", t.uidHex)
+                    1 -> {
+                        if (t.payload.isBlank()) Toast.makeText(this, "No NDEF payload on this dump", Toast.LENGTH_SHORT).show()
+                        else copyToClipboard("tag payload", t.payload)
+                    }
+                    2 -> {
+                        if (t.dumpHex.isBlank()) Toast.makeText(this, "No hex dump saved for this tag", Toast.LENGTH_SHORT).show()
+                        else copyToClipboard("tag dump", t.dumpHex)
+                    }
+                    3 -> Thread {
+                        db.tagDumpDao().delete(t.id)
+                        runOnUiThread { load() }
+                    }.start()
                 }
             }
             .show()

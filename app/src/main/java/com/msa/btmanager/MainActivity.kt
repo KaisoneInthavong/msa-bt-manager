@@ -11,6 +11,9 @@ import android.widget.EditText
 import android.widget.ListView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.msa.btmanager.data.AppDatabase
+import com.msa.btmanager.data.CommLogEntry
+import com.msa.btmanager.data.DeviceEntity
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -31,6 +34,9 @@ class MainActivity : AppCompatActivity() {
     private var outputStream: OutputStream? = null
     private var inputStream: InputStream? = null
 
+    private val db by lazy { AppDatabase.get(this) }
+    private var connectedAddress: String? = null
+
     private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
     /**
@@ -42,6 +48,19 @@ class MainActivity : AppCompatActivity() {
         "MSA", "ALTAIR", "4XR", "M7", "G1", "SLS", "ALPHA",
         "ALPHA BASE", "ALPHABASE", "TAG WRITER", "SCBA", "V-GARD", "LUNAR"
     )
+
+    /** Row model: devices found live via Bluetooth, or remembered from the database. */
+    private class DeviceRow(
+        val name: String,
+        val address: String,
+        val isMsa: Boolean,
+        val fromDb: Boolean,
+        val device: BluetoothDevice? = null
+    ) {
+        override fun toString(): String =
+            if (fromDb) "$name  [remembered]\n$address"
+            else "$name\n$address"
+    }
 
     @SuppressLint("MissingPermission")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,22 +79,59 @@ class MainActivity : AppCompatActivity() {
 
         listMsa.setOnItemClickListener { _, _, position, _ ->
             val item = listMsa.adapter.getItem(position) as DeviceRow
-            connectToDevice(item.device)
+            connectToDevice(item)
         }
         listOther.setOnItemClickListener { _, _, position, _ ->
             val item = listOther.adapter.getItem(position) as DeviceRow
-            connectToDevice(item.device)
+            connectToDevice(item)
         }
+
+        // Memory: show previously seen MSA devices right away
+        loadRememberedDevices()
+
+        // Memory: show the tail of the last session's communication log
+        loadRecentLog()
     }
 
-    /** Simple row model so we can carry the BluetoothDevice with each list entry. */
-    private class DeviceRow(val device: BluetoothDevice) {
-        override fun toString(): String {
-            @SuppressLint("MissingPermission")
-            val name = device.name ?: "Unknown device"
-            @SuppressLint("MissingPermission")
-            return "$name\n${device.address}"
-        }
+    @SuppressLint("MissingPermission")
+    private fun loadRememberedDevices() {
+        Thread {
+            val saved = db.deviceDao().getAllMsa()
+            val rows = saved.map { entity ->
+                DeviceRow(
+                    name = entity.name,
+                    address = entity.address,
+                    isMsa = true,
+                    fromDb = true,
+                    device = try {
+                        bluetoothAdapter?.getRemoteDevice(entity.address)
+                    } catch (e: IllegalArgumentException) {
+                        null
+                    }
+                )
+            }
+            if (rows.isNotEmpty()) {
+                runOnUiThread {
+                    listMsa.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, rows)
+                    log("Loaded ${rows.size} remembered MSA device(s) from history.")
+                }
+            }
+        }.start()
+    }
+
+    private fun loadRecentLog() {
+        Thread {
+            val entries = db.commLogDao().recent(20)
+            if (entries.isNotEmpty()) {
+                runOnUiThread {
+                    log("--- Restored last session's log (most recent first) ---")
+                    entries.reversed().forEach {
+                        log("${it.direction} [${it.deviceAddress}]: ${it.message}")
+                    }
+                    log("--- End of restored log ---")
+                }
+            }
+        }.start()
     }
 
     @SuppressLint("MissingPermission")
@@ -91,32 +147,76 @@ class MainActivity : AppCompatActivity() {
         val otherRows = mutableListOf<DeviceRow>()
 
         bluetoothAdapter?.bondedDevices?.forEach { device ->
-            if (isMsaDevice(device)) msaRows.add(DeviceRow(device)) else otherRows.add(DeviceRow(device))
+            val name = device.name ?: "Unknown device"
+            val isMsa = isMsaDevice(device)
+            val row = DeviceRow(name, device.address, isMsa, fromDb = false, device = device)
+            if (isMsa) msaRows.add(row) else otherRows.add(row)
         }
 
         listMsa.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, msaRows)
         listOther.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, otherRows)
 
         log("Scan complete: ${msaRows.size} MSA device(s), ${otherRows.size} other device(s).")
-        if (msaRows.isEmpty()) {
-            log("No MSA devices found. If your device is paired but missing, tell me its exact name and I will add it to the filter.")
-        }
+
+        // Memory: persist everything the scan found
+        Thread {
+            val now = System.currentTimeMillis()
+            (msaRows + otherRows).forEach { row ->
+                val existing = db.deviceDao().getByAddress(row.address)
+                db.deviceDao().upsert(
+                    DeviceEntity(
+                        address = row.address,
+                        name = row.name,
+                        isMsa = row.isMsa,
+                        lastSeen = now,
+                        connectionCount = existing?.connectionCount ?: 0
+                    )
+                )
+            }
+            runOnUiThread { log("Saved ${msaRows.size + otherRows.size} device(s) to memory.") }
+        }.start()
     }
 
     @SuppressLint("MissingPermission")
-    private fun connectToDevice(device: BluetoothDevice) {
-        log("Connecting to ${device.name ?: "Unknown device"}...")
+    private fun connectToDevice(row: DeviceRow) {
+        val device = row.device ?: try {
+            bluetoothAdapter?.getRemoteDevice(row.address)
+        } catch (e: IllegalArgumentException) {
+            null
+        }
 
+        if (device == null) {
+            log("Cannot find device ${row.address}. Is Bluetooth enabled and paired?")
+            return
+        }
+
+        log("Connecting to ${row.name}...")
         Thread {
             try {
                 socket = device.createRfcommSocketToServiceRecord(sppUuid)
                 socket?.connect()
                 outputStream = socket?.outputStream
                 inputStream = socket?.inputStream
+                connectedAddress = row.address
 
-                runOnUiThread { log("Connected successfully!") }
+                // Memory: record the connection
+                val now = System.currentTimeMillis()
+                val existing = db.deviceDao().getByAddress(row.address)
+                db.deviceDao().upsert(
+                    DeviceEntity(
+                        address = row.address,
+                        name = row.name,
+                        isMsa = row.isMsa,
+                        lastSeen = now,
+                        connectionCount = (existing?.connectionCount ?: 0) + 1
+                    )
+                )
+                db.deviceDao().recordConnection(row.address, now)
+
+                runOnUiThread { log("Connected successfully to ${row.name}!") }
                 startListening()
             } catch (e: IOException) {
+                connectedAddress = null
                 runOnUiThread { log("Connection failed: ${e.message}") }
             }
         }.start()
@@ -129,6 +229,14 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 outputStream?.write(cmd.toByteArray())
+
+                // Memory: record the sent command
+                connectedAddress?.let { addr ->
+                    db.commLogDao().insert(
+                        CommLogEntry(deviceAddress = addr, direction = "SENT", message = cmd)
+                    )
+                }
+
                 runOnUiThread { log("Sent: $cmd") }
             } catch (e: Exception) {
                 runOnUiThread { log("Send error: ${e.message}") }
@@ -144,9 +252,18 @@ class MainActivity : AppCompatActivity() {
                     val bytes = inputStream?.read(buffer) ?: -1
                     if (bytes > 0) {
                         val response = String(buffer, 0, bytes)
+
+                        // Memory: record the received response
+                        connectedAddress?.let { addr ->
+                            db.commLogDao().insert(
+                                CommLogEntry(deviceAddress = addr, direction = "RECEIVED", message = response)
+                            )
+                        }
+
                         runOnUiThread { log("Received: $response") }
                     }
                 } catch (e: IOException) {
+                    connectedAddress = null
                     runOnUiThread { log("Disconnected.") }
                     break
                 }

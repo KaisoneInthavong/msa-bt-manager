@@ -25,13 +25,18 @@ data class CommLogEntry(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-/** A saved RFID/NFC tag readout. */
+/**
+ * A saved RFID/NFC tag readout, Flipper-style:
+ * hex block dump + keys recovered by the dictionary attack.
+ */
 @Entity(tableName = "tag_dumps")
 data class TagDump(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val uidHex: String,
     val tagType: String,
     val sizeBytes: Int,
-    val payload: String, // decoded NDEF text or empty
+    val payload: String,   // decoded NDEF text or empty
+    @ColumnInfo(defaultValue = "") val dumpHex: String, // "blockIndex: HEX..." lines
+    @ColumnInfo(defaultValue = "") val foundKeys: String, // comma list of recovered keys
     val timestamp: Long = System.currentTimeMillis()
 )

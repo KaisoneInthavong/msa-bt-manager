@@ -49,6 +49,12 @@ interface TagDumpDao {
     @Query("SELECT * FROM tag_dumps ORDER BY timestamp DESC")
     fun getAll(): List<TagDump>
 
+    @Query("SELECT * FROM tag_dumps WHERE id = :id")
+    fun getById(id: Long): TagDump?
+
+    @Query("DELETE FROM tag_dumps WHERE id = :id")
+    fun delete(id: Long)
+
     @Query("DELETE FROM tag_dumps")
     fun deleteAll()
 }

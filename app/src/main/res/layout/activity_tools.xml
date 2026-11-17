@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Pocket Multi-Tool"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="All tools run on this phone alone."
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnBluetooth"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Bluetooth\nTerminal" />
+
+        <Button
+            android:id="@+id/btnNfc"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="NFC / RFID\nTool" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnArchive"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Archive\n(database)" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Hardware the phone does not have:"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnLF"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:alpha="0.4"
+        android:text="125 kHz RFID — unavailable" />
+
+    <Button
+        android:id="@+id/btnSubGhz"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:alpha="0.4"
+        android:text="Sub-GHz — unavailable" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Phones only have 13.56 MHz NFC radios. 125 kHz and Sub-GHz need dedicated hardware (e.g. an actual Flipper or MSA writer).\n\nMIFARE Classic dictionary attack, hex dumps, cloning of writable regions and NDEF writes ARE fully supported here."
+        android:textSize="12sp" />
+</LinearLayout>

@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -67,7 +68,6 @@ class MainActivity : AppCompatActivity() {
             else "$name\n$address"
     }
 
-    /** Runtime permission request — required since Android 12 (API 31). */
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -89,7 +89,6 @@ class MainActivity : AppCompatActivity() {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
 
-    /** Returns true if all permissions are already granted; otherwise asks and returns false. */
     private fun ensurePermissions(): Boolean {
         val missing = requiredPermissions().filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -119,6 +118,13 @@ class MainActivity : AppCompatActivity() {
         }
         btnSend.setOnClickListener { sendCommand() }
 
+        findViewById<Button>(R.id.btnDatabase).setOnClickListener {
+            startActivity(Intent(this, DataActivity::class.java))
+        }
+        findViewById<Button>(R.id.btnNfc).setOnClickListener {
+            startActivity(Intent(this, TagActivity::class.java))
+        }
+
         listMsa.setOnItemClickListener { _, _, position, _ ->
             val item = listMsa.adapter.getItem(position) as DeviceRow
             connectToDevice(item)
@@ -141,7 +147,7 @@ class MainActivity : AppCompatActivity() {
             val saved = db.deviceDao().getAllMsa()
             val rows = saved.map { entity ->
                 DeviceRow(
-                    name = entity.name,
+                    name = entity.alias.ifBlank { entity.name },
                     address = entity.address,
                     isMsa = true,
                     fromDb = true,
@@ -178,6 +184,12 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    /** Checks a name OR alias against the MSA keyword list. */
+    private fun nameIsMsa(nameOrAlias: String): Boolean {
+        val upper = nameOrAlias.uppercase(Locale.getDefault())
+        return msaNameKeywords.any { upper.contains(it) }
+    }
+
     @SuppressLint("MissingPermission")
     private fun isMsaDevice(device: BluetoothDevice): Boolean {
         return try {
@@ -191,38 +203,49 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun scanDevices() {
-        try {
-            val adapter = bluetoothAdapter
-            if (adapter == null) {
-                log("Bluetooth is not available on this phone.")
-                return
-            }
-            if (!adapter.isEnabled) {
-                log("Bluetooth is turned off. Enable it, then tap Scan.")
-                return
-            }
+        val adapter = bluetoothAdapter
+        if (adapter == null) {
+            log("Bluetooth is not available on this phone.")
+            return
+        }
+        if (!adapter.isEnabled) {
+            log("Bluetooth is turned off. Enable it, then tap Scan.")
+            return
+        }
 
-            val msaRows = mutableListOf<DeviceRow>()
-            val otherRows = mutableListOf<DeviceRow>()
+        // All DB reads and device-name reads happen off the main thread.
+        Thread {
+            try {
+                val aliasMap = db.deviceDao().getAll().associate { it.address to it.alias }
 
-            adapter.bondedDevices?.forEach { device ->
-                val name = try {
-                    device.name ?: "Unknown device"
-                } catch (e: SecurityException) {
-                    "Unknown device"
+                val msaRows = mutableListOf<DeviceRow>()
+                val otherRows = mutableListOf<DeviceRow>()
+
+                adapter.bondedDevices?.forEach { device ->
+                    val rawName = try {
+                        device.name ?: "Unknown device"
+                    } catch (e: SecurityException) {
+                        "Unknown device"
+                    }
+                    val alias = aliasMap[device.address] ?: ""
+                    val isMsa = isMsaDevice(device) || nameIsMsa(alias)
+                    val row = DeviceRow(
+                        alias.ifBlank { rawName },
+                        device.address,
+                        isMsa,
+                        fromDb = false,
+                        device = device
+                    )
+                    if (isMsa) msaRows.add(row) else otherRows.add(row)
                 }
-                val isMsa = isMsaDevice(device)
-                val row = DeviceRow(name, device.address, isMsa, fromDb = false, device = device)
-                if (isMsa) msaRows.add(row) else otherRows.add(row)
-            }
 
-            listMsa.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, msaRows)
-            listOther.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, otherRows)
+                runOnUiThread {
+                    listMsa.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, msaRows)
+                    listOther.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, otherRows)
+                    log("Scan complete: ${msaRows.size} MSA device(s), ${otherRows.size} other device(s).")
+                }
 
-            log("Scan complete: ${msaRows.size} MSA device(s), ${otherRows.size} other device(s).")
-
-            // Memory: persist everything the scan found
-            Thread {
+                // Memory: persist everything the scan found (keep aliases intact)
                 val now = System.currentTimeMillis()
                 (msaRows + otherRows).forEach { row ->
                     val existing = db.deviceDao().getByAddress(row.address)
@@ -230,6 +253,7 @@ class MainActivity : AppCompatActivity() {
                         DeviceEntity(
                             address = row.address,
                             name = row.name,
+                            alias = existing?.alias ?: "",
                             isMsa = row.isMsa,
                             lastSeen = now,
                             connectionCount = existing?.connectionCount ?: 0
@@ -237,10 +261,10 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 runOnUiThread { log("Saved ${msaRows.size + otherRows.size} device(s) to memory.") }
-            }.start()
-        } catch (e: Exception) {
-            log("Scan error: ${e.javaClass.simpleName}: ${e.message}")
-        }
+            } catch (e: Exception) {
+                runOnUiThread { log("Scan error: ${e.javaClass.simpleName}: ${e.message}") }
+            }
+        }.start()
     }
 
     @SuppressLint("MissingPermission")
@@ -274,6 +298,7 @@ class MainActivity : AppCompatActivity() {
                     DeviceEntity(
                         address = row.address,
                         name = row.name,
+                        alias = existing?.alias ?: "",
                         isMsa = row.isMsa,
                         lastSeen = now,
                         connectionCount = (existing?.connectionCount ?: 0) + 1
@@ -285,7 +310,8 @@ class MainActivity : AppCompatActivity() {
                 startListening()
             } catch (e: Exception) {
                 connectedAddress = null
-                runOnUiThread { runCatching { socket?.close() }; log("Connection failed: ${e.javaClass.simpleName}: ${e.message}") }
+                try { socket?.close() } catch (_: Exception) {}
+                runOnUiThread { log("Connection failed: ${e.javaClass.simpleName}: ${e.message}") }
             }
         }.start()
     }

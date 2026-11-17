@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="NFC / RFID Tag Tool"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Hold an NFC tag to the back of the phone to read it. To clone: Read tag A, tap Copy, tap Write Copied, then tap tag B."
+        android:textSize="12sp" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:background="#EEEEEE">
+
+        <TextView
+            android:id="@+id/tvTagLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:text="Waiting for tag..."
+            android:textColor="#000" />
+    </ScrollView>
+
+    <EditText
+        android:id="@+id/etNdefText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="Text to write to the next tag"
+        android:inputType="text" />
+
+    <Button
+        android:id="@+id/btnWrite"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Write text to next tag" />
+
+    <Button
+        android:id="@+id/btnCopy"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Copy last read tag" />
+
+    <Button
+        android:id="@+id/btnWriteCopied"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Write copied payload to next tag" />
+
+    <Button
+        android:id="@+id/btnDumps"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Show saved tag dumps" />
+</LinearLayout>

@@ -11,17 +11,41 @@
         android:layout_height="wrap_content"
         android:text="Scan Paired MSA Devices" />
 
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="MSA Devices"
+        android:textColor="#B71C1C"
+        android:textStyle="bold" />
+
     <ListView
-        android:id="@+id/deviceList"
+        android:id="@+id/listMsa"
         android:layout_width="match_parent"
-        android:layout_height="200dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="4dp"
+        android:layout_weight="2"
+        android:background="#FFF3E0" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:text="Other Paired Devices"
+        android:textStyle="bold" />
+
+    <ListView
+        android:id="@+id/listOther"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="4dp"
+        android:layout_weight="2"
         android:background="#F0F0F0" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:text="Send Command:"
         android:textStyle="bold" />
 
@@ -47,14 +71,15 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:text="Communication Log:"
         android:textStyle="bold" />
 
     <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
         android:layout_marginTop="8dp"
+        android:layout_weight="3"
         android:background="#E0E0E0">
 
         <TextView

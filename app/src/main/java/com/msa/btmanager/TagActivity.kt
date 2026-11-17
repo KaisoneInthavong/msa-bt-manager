@@ -400,8 +400,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
-    private val skipNotes = StringBuilder()
-    private fun skipLog(note: String) { skipNotes.appendLine(note) }
+    private fun skipLog(note: String) { runOnUiThread { tagLog(note) } }
 
     private fun parseDump(dump: String): Map<Int, ByteArray> {
         val map = mutableMapOf<Int, ByteArray>()

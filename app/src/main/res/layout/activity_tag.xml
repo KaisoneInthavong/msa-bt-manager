@@ -65,4 +65,16 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Show saved tag dumps" />
+
+    <Button
+        android:id="@+id/btnDumpCopy"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Copy full dump (clone source)" />
+
+    <Button
+        android:id="@+id/btnRestoreDump"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Restore dump to next tag (clone)" />
 </LinearLayout>

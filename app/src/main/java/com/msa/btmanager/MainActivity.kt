@@ -1,16 +1,21 @@
 package com.msa.btmanager
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ListView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.msa.btmanager.data.AppDatabase
 import com.msa.btmanager.data.CommLogEntry
 import com.msa.btmanager.data.DeviceEntity
@@ -62,6 +67,41 @@ class MainActivity : AppCompatActivity() {
             else "$name\n$address"
     }
 
+    /** Runtime permission request — required since Android 12 (API 31). */
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.all { it }) {
+            log("Permissions granted. Scanning...")
+            scanDevices()
+        } else {
+            log("Bluetooth permissions were denied. Allow them in Settings > Apps > MSA BT Manager > Permissions, then try Scan again.")
+        }
+    }
+
+    private fun requiredPermissions(): Array<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN
+            )
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+
+    /** Returns true if all permissions are already granted; otherwise asks and returns false. */
+    private fun ensurePermissions(): Boolean {
+        val missing = requiredPermissions().filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        return if (missing.isNotEmpty()) {
+            permissionLauncher.launch(missing.toTypedArray())
+            false
+        } else {
+            true
+        }
+    }
+
     @SuppressLint("MissingPermission")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,7 +114,9 @@ class MainActivity : AppCompatActivity() {
         etCommand = findViewById(R.id.etCommand)
         tvLog = findViewById(R.id.tvLog)
 
-        btnScan.setOnClickListener { scanDevices() }
+        btnScan.setOnClickListener {
+            if (ensurePermissions()) scanDevices()
+        }
         btnSend.setOnClickListener { sendCommand() }
 
         listMsa.setOnItemClickListener { _, _, position, _ ->
@@ -107,6 +149,8 @@ class MainActivity : AppCompatActivity() {
                         bluetoothAdapter?.getRemoteDevice(entity.address)
                     } catch (e: IllegalArgumentException) {
                         null
+                    } catch (e: SecurityException) {
+                        null
                     }
                 )
             }
@@ -136,45 +180,67 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun isMsaDevice(device: BluetoothDevice): Boolean {
-        val name = device.name ?: return false
-        val upper = name.uppercase(Locale.getDefault())
-        return msaNameKeywords.any { upper.contains(it) }
+        return try {
+            val name = device.name
+            val upper = name?.uppercase(Locale.getDefault()) ?: return false
+            msaNameKeywords.any { upper.contains(it) }
+        } catch (e: SecurityException) {
+            false
+        }
     }
 
     @SuppressLint("MissingPermission")
     private fun scanDevices() {
-        val msaRows = mutableListOf<DeviceRow>()
-        val otherRows = mutableListOf<DeviceRow>()
-
-        bluetoothAdapter?.bondedDevices?.forEach { device ->
-            val name = device.name ?: "Unknown device"
-            val isMsa = isMsaDevice(device)
-            val row = DeviceRow(name, device.address, isMsa, fromDb = false, device = device)
-            if (isMsa) msaRows.add(row) else otherRows.add(row)
-        }
-
-        listMsa.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, msaRows)
-        listOther.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, otherRows)
-
-        log("Scan complete: ${msaRows.size} MSA device(s), ${otherRows.size} other device(s).")
-
-        // Memory: persist everything the scan found
-        Thread {
-            val now = System.currentTimeMillis()
-            (msaRows + otherRows).forEach { row ->
-                val existing = db.deviceDao().getByAddress(row.address)
-                db.deviceDao().upsert(
-                    DeviceEntity(
-                        address = row.address,
-                        name = row.name,
-                        isMsa = row.isMsa,
-                        lastSeen = now,
-                        connectionCount = existing?.connectionCount ?: 0
-                    )
-                )
+        try {
+            val adapter = bluetoothAdapter
+            if (adapter == null) {
+                log("Bluetooth is not available on this phone.")
+                return
             }
-            runOnUiThread { log("Saved ${msaRows.size + otherRows.size} device(s) to memory.") }
-        }.start()
+            if (!adapter.isEnabled) {
+                log("Bluetooth is turned off. Enable it, then tap Scan.")
+                return
+            }
+
+            val msaRows = mutableListOf<DeviceRow>()
+            val otherRows = mutableListOf<DeviceRow>()
+
+            adapter.bondedDevices?.forEach { device ->
+                val name = try {
+                    device.name ?: "Unknown device"
+                } catch (e: SecurityException) {
+                    "Unknown device"
+                }
+                val isMsa = isMsaDevice(device)
+                val row = DeviceRow(name, device.address, isMsa, fromDb = false, device = device)
+                if (isMsa) msaRows.add(row) else otherRows.add(row)
+            }
+
+            listMsa.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, msaRows)
+            listOther.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, otherRows)
+
+            log("Scan complete: ${msaRows.size} MSA device(s), ${otherRows.size} other device(s).")
+
+            // Memory: persist everything the scan found
+            Thread {
+                val now = System.currentTimeMillis()
+                (msaRows + otherRows).forEach { row ->
+                    val existing = db.deviceDao().getByAddress(row.address)
+                    db.deviceDao().upsert(
+                        DeviceEntity(
+                            address = row.address,
+                            name = row.name,
+                            isMsa = row.isMsa,
+                            lastSeen = now,
+                            connectionCount = existing?.connectionCount ?: 0
+                        )
+                    )
+                }
+                runOnUiThread { log("Saved ${msaRows.size + otherRows.size} device(s) to memory.") }
+            }.start()
+        } catch (e: Exception) {
+            log("Scan error: ${e.javaClass.simpleName}: ${e.message}")
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -182,6 +248,8 @@ class MainActivity : AppCompatActivity() {
         val device = row.device ?: try {
             bluetoothAdapter?.getRemoteDevice(row.address)
         } catch (e: IllegalArgumentException) {
+            null
+        } catch (e: SecurityException) {
             null
         }
 
@@ -215,9 +283,9 @@ class MainActivity : AppCompatActivity() {
 
                 runOnUiThread { log("Connected successfully to ${row.name}!") }
                 startListening()
-            } catch (e: IOException) {
+            } catch (e: Exception) {
                 connectedAddress = null
-                runOnUiThread { log("Connection failed: ${e.message}") }
+                runOnUiThread { runCatching { socket?.close() }; log("Connection failed: ${e.javaClass.simpleName}: ${e.message}") }
             }
         }.start()
     }

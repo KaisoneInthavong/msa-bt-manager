@@ -8,6 +8,7 @@ import android.nfc.tech.MifareClassic
 import android.nfc.tech.MifareUltralight
 import android.nfc.tech.Ndef
 import android.nfc.tech.NdefFormatable
+import android.nfc.tech.NfcV
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -168,7 +169,13 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     override fun onTagDiscovered(tag: Tag?) {
         tag ?: return
-        val uidHex = tag.id?.joinToString("") { String.format(Locale.US, "%02X", it) } ?: "unknown"
+        val rawUid = tag.id ?: ByteArray(0)
+        // ISO 15693 reports its UID least-significant byte first; reverse it so
+        // the screen/archive matches the UID printed by other tools.
+        val isNfcV = tag.techList.contains("android.nfc.tech.NfcV")
+        val uidHex = (if (isNfcV) rawUid.reversedArray() else rawUid)
+            .joinToString("") { String.format(Locale.US, "%02X", it) }
+            .ifEmpty { "unknown" }
 
         // 1. Pending full-dump restore
         pendingRestoreDump?.let { dump ->
@@ -228,11 +235,13 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             sb.appendLine("NDEF: ${if (NdefFormatable.get(tag) != null) "not formatted yet" else "not supported"}")
         }
 
-        // ---- Full dump: MIFARE Classic dictionary attack, or Ultralight page sweep ----
+        // ---- Full dump: MIFARE Classic dictionary attack, Ultralight sweep or NFC-V blocks ----
         var dumpLines = ""
         var foundKeys = ""
+        var tagKind = ndefInfo
         val mfc = MifareClassic.get(tag)
         if (mfc != null) {
+            tagKind = "MIFARE Classic · $ndefInfo"
             sb.appendLine("\n--- MIFARE CLASSIC DICTIONARY ATTACK (${keyDictionary.size} keys) ---")
             val result = dumpMifareClassic(mfc)
             dumpLines = result.first
@@ -242,19 +251,26 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         } else {
             val mul = MifareUltralight.get(tag)
             if (mul != null) {
+                tagKind = "MIFARE Ultralight/NTAG · $ndefInfo"
                 sb.appendLine("\n--- MIFARE ULTRALIGHT / NTAG PAGE DUMP ---")
                 dumpLines = dumpMifareUltralight(mul)
                 sb.append(dumpLines.ifBlank { "no data" })
+            } else {
+                val nfcv = NfcV.get(tag)
+                if (nfcv != null) {
+                    tagKind = "ISO 15693 (NFC-V) · $ndefInfo"
+                    sb.appendLine("\n--- ISO 15693 (NFC-V) BLOCK DUMP ---")
+                    dumpLines = dumpNfcV(nfcv)
+                    sb.append(dumpLines.ifBlank { "no data" })
+                }
             }
         }
 
         // Memory: save the dump
-        val bytesPerBlock = if (mfc != null) 16 else 4
-        val blockCount = dumpLines.lineSequence().count { it.isNotBlank() }
         val dump = TagDump(
             uidHex = uidHex,
-            tagType = ndefInfo,
-            sizeBytes = blockCount * bytesPerBlock,
+            tagType = tagKind,
+            sizeBytes = dumpSizeBytes(dumpLines),
             payload = payloadText,
             dumpHex = dumpLines,
             foundKeys = foundKeys
@@ -332,6 +348,63 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private fun blockLine(index: Int, data: ByteArray): String =
         String.format(Locale.US, "%02X: ", index) +
                 data.joinToString("") { String.format(Locale.US, "%02X", it) }
+
+    /**
+     * ISO 15693 / NFC-V dump: reads single blocks (command 0x22) until the tag
+     * stops answering. Block size comes from the response, so 4-byte (common)
+     * and 8-byte tags both work.
+     */
+    private fun dumpNfcV(nfcv: NfcV): String {
+        val out = StringBuilder()
+        val maxBlocks = 256
+        var misses = 0
+        try {
+            nfcv.connect()
+            var block = 0
+            while (block < maxBlocks && misses < 3) {
+                val data = nfcvReadBlock(nfcv, block)
+                if (data == null) {
+                    misses++
+                } else {
+                    misses = 0
+                    out.appendLine(blockLine(block, data))
+                }
+                block++
+            }
+        } catch (e: Exception) {
+            out.appendLine("NFC-V error: ${e.message}")
+        } finally {
+            try { nfcv.close() } catch (_: Exception) {}
+        }
+        return out.toString()
+    }
+
+    /** Read one ISO 15693 block, trying the usual request-flag variants. */
+    private fun nfcvReadBlock(nfcv: NfcV, block: Int): ByteArray? {
+        for (flags in intArrayOf(0x00, 0x02)) {
+            try {
+                val response = nfcv.transceive(
+                    byteArrayOf(flags.toByte(), 0x22, block.toByte()) // 0x22 = read single block
+                )
+                // Byte 0 is the response flags; bit 0 means the tag reported an error.
+                if (response.size >= 2 && (response[0].toInt() and 0x01) == 0) {
+                    return response.copyOfRange(1, response.size)
+                }
+            } catch (_: Exception) {
+                // Try the next flag variant.
+            }
+        }
+        return null
+    }
+
+    /** Bytes covered by the "XX: HEX" lines of a dump, for the archive size column. */
+    private fun dumpSizeBytes(dump: String): Int {
+        val pattern = Regex("^[0-9A-Fa-f]{1,4}:\\s*([0-9A-Fa-f]+)$")
+        return dump.lineSequence().sumOf { line ->
+            val match = pattern.find(line) ?: return@sumOf 0
+            match.groupValues[1].length / 2
+        }
+    }
 
     // ---------- WRITE / RESTORE ----------
 
@@ -431,7 +504,8 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             if (line.startsWith(">>") || line.contains("LOCKED")) return@forEach
             val colon = line.indexOf(':')
             if (colon <= 0) return@forEach
-            val index = line.substring(0, colon).trim().toIntOrNull() ?: return@forEach
+            // Block/page index is printed in hex (e.g. "0A: ..."), so parse it as hex.
+            val index = line.substring(0, colon).trim().toIntOrNull(16) ?: return@forEach
             val hex = line.substring(colon + 1).replace(" ", "").trim()
             if (hex.isEmpty()) return@forEach
             map[index] = hexToBytes(hex)

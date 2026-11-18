@@ -6,9 +6,13 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.MifareClassic
 import android.nfc.tech.MifareUltralight
+import android.nfc.tech.Ndef
+import android.nfc.tech.NdefFormatable
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.msa.btmanager.data.AppDatabase
@@ -59,6 +63,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 tagLog("Type some text first.")
             } else {
                 pendingWrite = text
+                pendingRestoreDump = null
                 tagLog("Armed: will write \"$text\" to the next tapped tag.")
             }
         }
@@ -79,6 +84,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 tagLog("No copied payload. Read a tag and tap Copy.")
             } else {
                 pendingWrite = payload
+                pendingRestoreDump = null
                 tagLog("Armed: will write copied payload to the next tapped tag.")
             }
         }
@@ -92,7 +98,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 copiedDump = dump.dumpHex
                 copiedDumpUid = dump.uidHex
                 copiedDumpKeys = dump.foundKeys.split(",").filter { it.isNotBlank() }
-                tagLog("Copied full dump of tag ${dump.uidHex} (${dump.dumpHex.length / 3} block entries, ${dump.foundKeys.split(",").count { it.isNotBlank() }} key(s)).")
+                tagLog("Copied full dump of tag ${dump.uidHex} (${dump.dumpHex.lineSequence().count { it.isNotBlank() }} block entries, ${dump.foundKeys.split(",").count { it.isNotBlank() }} key(s)).")
             }
         }
 
@@ -102,6 +108,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 tagLog("No copied dump. Tap a tag, then 'Copy full dump'.")
             } else {
                 pendingRestoreDump = dump
+                pendingWrite = null
                 tagLog("Armed: will restore the copied dump ($copiedDumpUid) to the next tapped tag.")
             }
         }
@@ -132,22 +139,34 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             tagLog("This phone has no NFC hardware.")
             return
         }
-        nfc.enableReaderMode(
-            this, this, NfcAdapter.FLAG_READER_NFC_A
-                    or NfcAdapter.FLAG_READER_NFC_B
-                    or NfcAdapter.FLAG_READER_NFC_F
-                    or NfcAdapter.FLAG_READER_NFC_V, null
-        )
+        if (!nfc.isEnabled) {
+            tagLog("NFC is turned off. Turn it on in Settings, then come back to this screen.")
+            return
+        }
+        try {
+            nfc.enableReaderMode(
+                this, this, NfcAdapter.FLAG_READER_NFC_A
+                        or NfcAdapter.FLAG_READER_NFC_B
+                        or NfcAdapter.FLAG_READER_NFC_F
+                        or NfcAdapter.FLAG_READER_NFC_V, null
+            )
+            tagLog("Ready — hold a tag against the back of the phone.")
+        } catch (e: Exception) {
+            tagLog("Could not start the NFC reader: ${e.javaClass.simpleName}: ${e.message}")
+        }
     }
 
     override fun onPause() {
-        NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this)
+        try {
+            NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this)
+        } catch (_: Exception) {
+        }
         super.onPause()
     }
 
     override fun onTagDiscovered(tag: Tag?) {
         tag ?: return
-        val uidHex = tag.id?.joinToString("") { "%02X".format(it) } ?: "unknown"
+        val uidHex = tag.id?.joinToString("") { String.format(Locale.US, "%02X", it) } ?: "unknown"
 
         // 1. Pending full-dump restore
         pendingRestoreDump?.let { dump ->
@@ -184,7 +203,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         var payloadText = ""
         var ndefInfo = "no NDEF"
 
-        val ndef = android.nfc.Ndef.get(tag)
+        val ndef = Ndef.get(tag)
         if (ndef != null) {
             try {
                 ndef.connect()
@@ -204,7 +223,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 try { ndef.close() } catch (_: Exception) {}
             }
         } else {
-            sb.appendLine("NDEF: ${if (android.nfc.NdefFormatable.get(tag) != null) "not formatted yet" else "not supported"}")
+            sb.appendLine("NDEF: ${if (NdefFormatable.get(tag) != null) "not formatted yet" else "not supported"}")
         }
 
         // ---- Full dump: MIFARE Classic dictionary attack, or Ultralight page sweep ----
@@ -228,10 +247,12 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
 
         // Memory: save the dump
+        val bytesPerBlock = if (mfc != null) 16 else 4
+        val blockCount = dumpLines.lineSequence().count { it.isNotBlank() }
         val dump = TagDump(
             uidHex = uidHex,
             tagType = ndefInfo,
-            sizeBytes = dumpLines.toByteArray().size,
+            sizeBytes = blockCount * bytesPerBlock,
             payload = payloadText,
             dumpHex = dumpLines,
             foundKeys = foundKeys
@@ -254,13 +275,13 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 var authed = false
                 for (k in keys) {
                     if (mfc.authenticateSectorWithKeyA(sector, k)) {
-                        authed = true; found.add("%012X".format(toLong(k))); break
+                        authed = true; found.add(String.format(Locale.US, "%012X", toLong(k))); break
                     }
                 }
                 if (!authed) {
                     for (k in keys) {
                         if (mfc.authenticateSectorWithKeyB(sector, k)) {
-                            authed = true; found.add("%012X".format(toLong(k))); break
+                            authed = true; found.add(String.format(Locale.US, "%012X", toLong(k))); break
                         }
                     }
                 }
@@ -307,7 +328,8 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     }
 
     private fun blockLine(index: Int, data: ByteArray): String =
-        "%02X: ".format(index) + data.joinToString("") { "%02X".format(it) }
+        String.format(Locale.US, "%02X: ", index) +
+                data.joinToString("") { String.format(Locale.US, "%02X", it) }
 
     // ---------- WRITE / RESTORE ----------
 
@@ -315,7 +337,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         return try {
             val record: NdefRecord = NdefRecord.createTextRecord("en", text)
             val message = NdefMessage(arrayOf(record))
-            val ndef = android.nfc.Ndef.get(tag)
+            val ndef = Ndef.get(tag)
             if (ndef != null) {
                 if (!ndef.isWritable) return "Tag is read-only"
                 val needed = message.toByteArray().size
@@ -325,7 +347,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 try { ndef.close() } catch (_: Exception) {}
                 null
             } else {
-                val fmt = android.nfc.NdefFormatable.get(tag)
+                val fmt = NdefFormatable.get(tag)
                     ?: return "Tag does not support NDEF (${tag.techList.joinToString()})"
                 fmt.connect()
                 fmt.format(message)
@@ -368,9 +390,10 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 val keys = (copiedDumpKeys + keyDictionary).map { hexToBytes(it) }.distinct()
                 var written = 0
                 blocks.forEach { (block, data) ->
-                    // Skip manufacturer block 0..1 and every sector trailer
+                    // Skip manufacturer block 0..1 and every sector trailer.
+                    // 1K/2K tags: 4 blocks per sector. 4K tags: sectors 32+ have 16 blocks.
                     if (block == 0 || block == 1) return@forEach
-                    val trailer = (block % 4 == 3 && block < 256)
+                    val trailer = if (block < 128) block % 4 == 3 else (block - 128) % 16 == 15
                     if (trailer) { skipLog("block $block is a sector trailer — skipped"); return@forEach }
                     val sector = if (block < 128) block / 4 else 32 + (block - 128) / 16
                     var ok = false
@@ -448,5 +471,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun tagLog(message: String) {
         tvTagLog.append("\n$message")
+        val logScroller = tvTagLog.parent as? ScrollView
+        logScroller?.post { logScroller.fullScroll(View.FOCUS_DOWN) }
     }
 }

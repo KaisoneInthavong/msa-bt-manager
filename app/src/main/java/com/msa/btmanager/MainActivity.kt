@@ -285,6 +285,13 @@ class MainActivity : AppCompatActivity() {
         log("Connecting to ${row.name}...")
         Thread {
             try {
+                // Drop any previous connection first so we don't leak a socket
+                // or keep an old reader thread alive.
+                try { socket?.close() } catch (_: Exception) {}
+                socket = null
+                outputStream = null
+                inputStream = null
+
                 socket = device.createRfcommSocketToServiceRecord(sppUuid)
                 socket?.connect()
                 outputStream = socket?.outputStream
@@ -307,7 +314,11 @@ class MainActivity : AppCompatActivity() {
                 db.deviceDao().recordConnection(row.address, now)
 
                 runOnUiThread { log("Connected successfully to ${row.name}!") }
-                startListening()
+                val connectedSocket = socket
+                val connectedInput = inputStream
+                if (connectedSocket != null && connectedInput != null) {
+                    startListening(connectedSocket, connectedInput)
+                }
             } catch (e: Exception) {
                 connectedAddress = null
                 try { socket?.close() } catch (_: Exception) {}
@@ -319,10 +330,15 @@ class MainActivity : AppCompatActivity() {
     private fun sendCommand() {
         val cmd = etCommand.text.toString()
         if (cmd.isEmpty()) return
+        val out = outputStream
+        if (out == null || socket?.isConnected != true) {
+            log("Not connected. Pick a device from the list first.")
+            return
+        }
 
         Thread {
             try {
-                outputStream?.write(cmd.toByteArray())
+                out.write(cmd.toByteArray())
 
                 // Memory: record the sent command
                 connectedAddress?.let { addr ->
@@ -338,14 +354,15 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun startListening() {
+    private fun startListening(activeSocket: BluetoothSocket, input: InputStream) {
         Thread {
             val buffer = ByteArray(1024)
-            while (socket?.isConnected == true) {
+            while (activeSocket.isConnected && socket === activeSocket) {
                 try {
-                    val bytes = inputStream?.read(buffer) ?: -1
+                    val bytes = input.read(buffer)
+                    if (bytes < 0) break
                     if (bytes > 0) {
-                        val response = String(buffer, 0, bytes)
+                        val response = String(buffer, 0, bytes, Charsets.UTF_8)
 
                         // Memory: record the received response
                         connectedAddress?.let { addr ->
@@ -357,8 +374,10 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread { log("Received: $response") }
                     }
                 } catch (e: IOException) {
-                    connectedAddress = null
-                    runOnUiThread { log("Disconnected.") }
+                    if (socket === activeSocket) {
+                        connectedAddress = null
+                        runOnUiThread { log("Disconnected.") }
+                    }
                     break
                 }
             }

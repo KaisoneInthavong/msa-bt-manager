@@ -1,7 +1,5 @@
 package com.msa.btmanager
 
-import android.nfc.Ndef
-import android.nfc.NdefFormatable
 import android.nfc.NdefMessage
 import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
@@ -186,7 +184,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         var payloadText = ""
         var ndefInfo = "no NDEF"
 
-        val ndef = Ndef.get(tag)
+        val ndef = android.nfc.Ndef.get(tag)
         if (ndef != null) {
             try {
                 ndef.connect()
@@ -206,7 +204,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 try { ndef.close() } catch (_: Exception) {}
             }
         } else {
-            sb.appendLine("NDEF: ${if (NdefFormatable.get(tag) != null) "not formatted yet" else "not supported"}")
+            sb.appendLine("NDEF: ${if (android.nfc.NdefFormatable.get(tag) != null) "not formatted yet" else "not supported"}")
         }
 
         // ---- Full dump: MIFARE Classic dictionary attack, or Ultralight page sweep ----
@@ -317,7 +315,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         return try {
             val record: NdefRecord = NdefRecord.createTextRecord("en", text)
             val message = NdefMessage(arrayOf(record))
-            val ndef = Ndef.get(tag)
+            val ndef = android.nfc.Ndef.get(tag)
             if (ndef != null) {
                 if (!ndef.isWritable) return "Tag is read-only"
                 val needed = message.toByteArray().size
@@ -327,7 +325,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 try { ndef.close() } catch (_: Exception) {}
                 null
             } else {
-                val fmt = NdefFormatable.get(tag)
+                val fmt = android.nfc.NdefFormatable.get(tag)
                     ?: return "Tag does not support NDEF (${tag.techList.joinToString()})"
                 fmt.connect()
                 fmt.format(message)

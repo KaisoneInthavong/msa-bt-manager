@@ -98,7 +98,9 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 copiedDump = dump.dumpHex
                 copiedDumpUid = dump.uidHex
                 copiedDumpKeys = dump.foundKeys.split(",").filter { it.isNotBlank() }
-                tagLog("Copied full dump of tag ${dump.uidHex} (${dump.dumpHex.lineSequence().count { it.isNotBlank() }} block entries, ${dump.foundKeys.split(",").count { it.isNotBlank() }} key(s)).")
+                val entryCount = dump.dumpHex.lineSequence().count { it.isNotBlank() }
+                val keyCount = dump.foundKeys.split(",").count { it.isNotBlank() }
+                tagLog("Copied full dump of tag ${dump.uidHex} ($entryCount block entries, $keyCount key(s)).")
             }
         }
 
@@ -471,7 +473,7 @@ class TagActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun tagLog(message: String) {
         tvTagLog.append("\n$message")
-        val logScroller = tvTagLog.parent as? ScrollView
-        logScroller?.post { logScroller.fullScroll(View.FOCUS_DOWN) }
+        val logScroller = tvTagLog.parent as? ScrollView ?: return
+        logScroller.post { logScroller.fullScroll(View.FOCUS_DOWN) }
     }
 }

@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
 
     <uses-feature android:name="android.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
     <application
@@ -38,5 +39,27 @@
         <activity
             android:name=".TagActivity"
             android:exported="false" />
+
+        <activity
+            android:name=".EmulateActivity"
+            android:exported="false" />
+
+        <!--
+            Host Card Emulation: presents a read-only NDEF Type 4 Tag.
+            Disabled until the user starts emulation from EmulateActivity,
+            so the phone does not advertise the AID the rest of the time.
+        -->
+        <service
+            android:name=".NdefEmulatorService"
+            android:enabled="false"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/nfc_ndef_apduservice" />
+        </service>
     </application>
 </manifest>

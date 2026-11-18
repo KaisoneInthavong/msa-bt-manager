@@ -21,6 +21,9 @@ class ToolsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnArchive).setOnClickListener {
             startActivity(Intent(this, DataActivity::class.java))
         }
+        findViewById<Button>(R.id.btnEmulate).setOnClickListener {
+            startActivity(Intent(this, EmulateActivity::class.java))
+        }
         findViewById<Button>(R.id.btnLF).setOnClickListener {
             Toast.makeText(this, "No 125 kHz radio in phones — needs dedicated hardware", Toast.LENGTH_LONG).show()
         }

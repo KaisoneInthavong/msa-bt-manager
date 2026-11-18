@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pocket Multi-Tool</string>
+    <string name="ndef_emulator_description">Emulates a read-only NDEF tag</string>
+    <string name="ndef_emulator_aid_group">NDEF tag emulation</string>
+</resources>

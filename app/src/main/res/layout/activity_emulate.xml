@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Emulate NFC tag"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="This phone will answer other NFC readers as a read-only NDEF tag carrying the text below. Tap the reader on the back of this phone — not on this phone's screen."
+            android:textSize="12sp" />
+
+        <EditText
+            android:id="@+id/etEmulateText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="Text or URL the tag should carry"
+            android:inputType="textMultiLine"
+            android:minLines="3"
+            android:gravity="top" />
+
+        <Button
+            android:id="@+id/btnStartEmulation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Start emulating" />
+
+        <Button
+            android:id="@+id/btnStopEmulation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Stop emulating" />
+
+        <TextView
+            android:id="@+id/tvEmulateStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="#EEEEEE"
+            android:padding="8dp"
+            android:textColor="#000"
+            android:text="Not emulating." />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textStyle="bold"
+            android:text="What this can and cannot do" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="12sp"
+            android:text="Supported: NDEF Type 4 tags — text, URLs and other NDEF records. Works with other phones, Flipper Zero and most NDEF-aware readers.\n\nNot possible on a stock phone: MIFARE Classic/Ultralight badge clones, 125 kHz RFID, or picking the UID shown over the air. Android's NFC controller only exposes ISO-DEP APDU emulation, and the UID is fixed by the hardware. Cloning building badges or MSA writer tags therefore needs dedicated hardware, not this app." />
+
+    </LinearLayout>
+</ScrollView>
